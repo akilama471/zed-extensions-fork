@@ -6,6 +6,7 @@ import {
   validateManifest,
   validateExtensionIdsNotChanged,
   assertVersionNotDecreased,
+  validateGitmodulesLocations,
 } from "./validation.js";
 import {
   readApache2License,
@@ -24,7 +25,7 @@ describe("validateManifest", () => {
   describe("given a valid manifest", () => {
     it("does not throw", () => {
       const validManifest = {
-        name: "My Valid Extension",
+        name: "My Cool Language Server",
         version: "1.0.0",
         authors: ["Me <me@example.com>"],
         description: "This extension is very cool",
@@ -44,11 +45,31 @@ describe("validateManifest", () => {
       );
     });
   });
+
+  describe('when the name ends with " Zed"', () => {
+    it("throws a validation error", () => {
+      expect(() =>
+        validateManifest({ name: "Something Zed" }),
+      ).toThrowErrorMatchingInlineSnapshot(
+        `[Error: Extension names should not end with " Zed", as they are all Zed extensions: "Something Zed".]`,
+      );
+    });
+  });
+
+  describe('when the name contains the word "extension"', () => {
+    it("throws a validation error", () => {
+      expect(() =>
+        validateManifest({ name: "Something Extension" }),
+      ).toThrowErrorMatchingInlineSnapshot(
+        `[Error: Extension names should not include the word "extension", as they are all Zed extensions: "Something Extension".]`,
+      );
+    });
+  });
 });
 
 describe("validateExtensionsToml", () => {
   describe("when `extensions.toml` only contains extensions with valid IDs and entries", () => {
-    it.each(["my-cool-extension", "base16"])(
+    it.each(["my-cool-language", "base16"])(
       'does not throw for "%s"',
       (extensionId) => {
         const extensionsToml = {
@@ -78,30 +99,45 @@ describe("validateExtensionsToml", () => {
     );
   });
 
+  describe("when `extensions.toml` contains an extension ID containing `extension`", () => {
+    it.each(["bad-extension", "rusty-extension-theme"])(
+      'throws a validation error for "%s"',
+      (extensionId) => {
+        const extensionsToml = {
+          [extensionId]: {},
+        };
+
+        expect(() => validateExtensionsToml(extensionsToml)).toThrowError(
+          `Extension IDs should not include "extension", as they are all Zed extensions: "${extensionId}".`,
+        );
+      },
+    );
+  });
+
   describe("when `extensions.toml` contains an entry with missing submodule", () => {
-    it.each(["my-cool-extension"])('does not throw for "%s"', (extensionId) => {
+    it('does not throw for "%s"', () => {
       const extensionsToml = {
-        [extensionId]: {
+        "my-cool-language": {
           version: "0.1.0",
         },
       };
 
       expect(() => validateExtensionsToml(extensionsToml)).toThrowError(
-        `Missing required field "submodule" or "version" for extension "${extensionId}"`,
+        `Missing required field "submodule" or "version" for extension "my-cool-language"`,
       );
     });
   });
 
   describe("when `extensions.toml` contains an entry with missing version", () => {
-    it.each(["my-cool-extension"])('does not throw for "%s"', (extensionId) => {
+    it('does not throw for "%s"', () => {
       const extensionsToml = {
-        [extensionId]: {
+        "my-cool-language": {
           submodule: "https://github.com/zed-extensions/my-extension",
         },
       };
 
       expect(() => validateExtensionsToml(extensionsToml)).toThrowError(
-        `Missing required field "submodule" or "version" for extension "${extensionId}"`,
+        `Missing required field "submodule" or "version" for extension "my-cool-language"`,
       );
     });
   });
@@ -493,5 +529,52 @@ describe("validateExtensionIdsNotChanged", () => {
         If you need to rename an extension, update the display name in the extension's manifest instead.]
       `);
     });
+  });
+});
+
+describe("validateGitmodulesLocations", () => {
+  it("does not throw for valid submodule configuration", () => {
+    const extensionsToml = {
+      "my-extension": { submodule: "extensions/my-extension", version: "1.0.0" },
+    };
+    const gitmodules = {
+      "extensions/my-extension": { path: "extensions/my-extension" },
+    };
+    expect(() =>
+      validateGitmodulesLocations(extensionsToml, gitmodules),
+    ).not.toThrow();
+  });
+
+  it("throws when submodule is missing in gitmodules", () => {
+    const extensionsToml = {
+      "my-extension": { submodule: "extensions/my-extension", version: "1.0.0" },
+    };
+    expect(() =>
+      validateGitmodulesLocations(extensionsToml, {}),
+    ).toThrowError('Could not find submodule "extensions/my-extension" for extension ID "my-extension".');
+  });
+
+  it("throws when submodule name does not match expected name", () => {
+    const extensionsToml = {
+      "my-extension": { submodule: "extensions/wrong-name", version: "1.0.0" },
+    };
+    const gitmodules = {
+      "extensions/wrong-name": { path: "extensions/wrong-name" },
+    };
+    expect(() =>
+      validateGitmodulesLocations(extensionsToml, gitmodules),
+    ).toThrowError("Submodule name extensions/wrong-name does not match expected name.");
+  });
+
+  it("throws when name and path do not match", () => {
+    const extensionsToml = {
+      "my-extension": { submodule: "extensions/my-extension", version: "1.0.0" },
+    };
+    const gitmodules = {
+      "extensions/my-extension": { path: "extensions/wrong-path" },
+    };
+    expect(() =>
+      validateGitmodulesLocations(extensionsToml, gitmodules),
+    ).toThrowError("Name and path do not match for submodule extensions/my-extension.");
   });
 });
